@@ -1,4 +1,5 @@
 mod breakpoints;
+mod checkpoints;
 mod debugger_terminal;
 mod launch;
 mod step_in;
@@ -20,6 +21,7 @@ use crate::python::{PythonInterface, PythonSession};
 use crate::shared::Shared;
 use crate::terminal::Terminal;
 use breakpoints::Breakpoints;
+use checkpoints::Checkpoints;
 use debugger_terminal::DebuggerTerminal;
 use variables::Container;
 
@@ -61,6 +63,7 @@ pub struct DebugSession {
     no_debug: bool,
 
     breakpoints: RefCell<Breakpoints>,
+    checkpoints: RefCell<Checkpoints>,
     var_refs: HandleTree<Container>,
     disassembly: disassembly::AddressSpace,
     source_map_cache: RefCell<HashMap<PathBuf, Option<Rc<PathBuf>>>>,
@@ -147,6 +150,7 @@ impl DebugSession {
             no_debug: false,
 
             breakpoints: RefCell::new(Breakpoints::new()),
+            checkpoints: RefCell::new(Checkpoints::new()),
             var_refs: HandleTree::new(),
             disassembly: disassembly::AddressSpace::new(&target),
             source_map_cache: RefCell::new(HashMap::new()),
@@ -1445,6 +1449,9 @@ impl DebugSession {
             PythonEvent::DebuggerMessage { output, category } => {
                 self.console_message_impl(Some(&category), output);
             }
+            PythonEvent::WatchCommand { address } => {
+                self.add_watch_page(address);
+            }
         }
     }
 
@@ -1574,6 +1581,12 @@ impl DebugSession {
             match process_event.process_state() {
                 Running | Stepping | Attaching | Launching => self.notify_process_running(),
                 Stopped => {
+                    if self.is_checkpoint_event(process_event) {
+                        // Handle checkpoint event
+                        if let Err(e) = self.new_checkpoint() {
+                            self.console_error(format!("Failed to create checkpoint: {}", e));
+                        }
+                    } else
                     if !process_event.restarted() {
                         self.notify_process_stopped()
                     }

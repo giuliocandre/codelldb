@@ -74,6 +74,10 @@ def create_webview(html: Optional[str] = None, title: Optional[str] = None, view
                            )
     return webview
 
+def watch_address(addr: int):
+    debugger_id = interface.current_debugger().GetID()
+    interface.fire_event(debugger_id, dict(type='DebuggerMessage', address=addr))
+
 
 def debugger_message(output: str, category: str = 'console'):
     debugger_id = interface.current_debugger().GetID()

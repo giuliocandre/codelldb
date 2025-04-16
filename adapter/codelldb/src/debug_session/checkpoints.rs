@@ -47,8 +47,11 @@ impl DebugSession {
         }
 
         // Get the faulting address
-        let pc = thread.frame_at_index(0).pc_address();
-        let fault_address = pc.load_address(&self.target);
+        let siginfo = thread.siginfo();
+        // Start Generation Here
+        let sifields = siginfo.child_member_with_name("_sifields").unwrap();
+        let sigsys = sifields.child_member_with_name("_sigsys").unwrap();
+        let fault_address = sigsys.child_at_index(0).value_as_address();
 
         // Check if the faulting address is in a watched page
         self.checkpoints.borrow().watch_pages.iter().any(|&page| {

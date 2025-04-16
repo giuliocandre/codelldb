@@ -178,6 +178,11 @@ impl SBThread {
         });
         unsafe { get_str(ptr) }
     }
+    pub fn siginfo(&self) -> SBValue {
+        cpp!(unsafe [self as "SBThread*"] -> SBValue as "SBValue" {
+            return self->GetSiginfo();
+        })
+    }
 }
 
 impl IsValid for SBThread {

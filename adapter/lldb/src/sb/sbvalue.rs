@@ -142,6 +142,11 @@ impl SBValue {
             return self->GetValueAsUnsigned(fail_value);
         })
     }
+    pub fn value_as_address(&self) -> Address {
+        cpp!(unsafe [self as "SBValue*" ] -> Address as "addr_t" {
+            return self->GetValueAsAddress();
+        })
+    }
     pub fn try_value_as_signed(&self) -> Result<i64, SBError> {
         let mut error = SBError::new();
         let value = cpp!(unsafe [self as "SBValue*", mut error as "SBError"] -> i64 as "int64_t" {

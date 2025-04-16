@@ -1585,6 +1585,7 @@ impl DebugSession {
                         // Handle checkpoint event
                         if let Err(e) = self.new_checkpoint() {
                             self.console_error(format!("Failed to create checkpoint: {}", e));
+                            self.notify_process_stopped();
                         }
                     } else
                     if !process_event.restarted() {

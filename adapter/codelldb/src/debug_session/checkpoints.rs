@@ -5,6 +5,7 @@ use adapter_protocol::*;
 use crate::prelude::*;
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use crate::expressions::{self, FormatSpec, PreparedExpression};
 
 #[derive(Clone)]
 pub struct Checkpoint {
@@ -46,12 +47,10 @@ impl DebugSession {
             return false;
         }
 
-        // Get the faulting address
-        let siginfo = thread.siginfo();
-        // Start Generation Here
-        let sifields = siginfo.child_member_with_name("_sifields").unwrap();
-        let sigsys = sifields.child_member_with_name("_sigsys").unwrap();
-        let fault_address = sigsys.child_at_index(0).value_as_address();
+        let fault_address = match thread.current_fault_addr() {
+            Some(addr) => addr,
+            None => return false,
+        };
 
         // Check if the faulting address is in a watched page
         self.checkpoints.borrow().watch_pages.iter().any(|&page| {
@@ -63,10 +62,28 @@ impl DebugSession {
         })
     }
 
+    pub fn mprotect_memory(&self, address: u64, protection: u8) -> Result<(), Error> {
+        let process = self.target.process();
+        let thread = process.selected_thread();
+        let frame = thread.frame_at_index(0);
+
+        // TODO: dirty hack with expression evaluation
+        let expression = format!("(int)mprotect({}, {}, 0x1000)", address, protection);
+        let (pp_expr, _) =
+            expressions::prepare_with_format(&expression, self.default_expr_type).map_err(blame_user)?;
+
+        self.evaluate_expr_in_frame(&pp_expr, Some(&frame))?;
+        Ok(())
+    }
+
     pub(super) fn add_watch_page(&mut self, address: u64) {
         // Add the address to the watch list
         let mut checkpoints = self.checkpoints.borrow_mut();
         checkpoints.watch_pages.push(address);
+        if let Err(e) = self.mprotect_memory(address & !0xfff, 0x1) {
+            self.console_error(format!("Failed to mprotect memory: {}", e));
+            return;
+        }
         self.console_message(format!("Added watch on address 0x{:X}", address));
     }
 
@@ -84,21 +101,21 @@ impl DebugSession {
 
         self.checkpoints.borrow_mut().checkpoints.push(checkpoint);
 
-        // Make memory writable temporarily
-        let process = self.target.process();
-        let thread = process.selected_thread();
+        let fault_address = thread.current_fault_addr().ok_or("Failed to get fault address")?;
+        self.mprotect_memory(fault_address & !0xFFF, 0x3)?;
 
-        // TODO: Implement memory protection change
-        // For now, just step over the instruction
         if let Err(e) = thread.step_instruction(true) {
             self.console_error(format!("Failed to step instruction: {}", e));
+            return Err(e.into())
         }
 
-        // TODO: Restore memory protection
+        self.mprotect_memory(fault_address & !0xFFF, 0x1)?;
+
 
         // Continue execution without sending StoppedEvent
         if let Err(e) = process.resume() {
             self.console_error(format!("Failed to continue execution: {}", e));
+            return Err(e.into())
         }
         Ok(())
     }

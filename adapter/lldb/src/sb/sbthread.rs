@@ -183,6 +183,13 @@ impl SBThread {
             return self->GetSiginfo();
         })
     }
+
+    pub fn current_fault_addr(&self) -> Option<Address> {
+        let siginfo = self.siginfo();
+        let sifields = siginfo.child_member_with_name("_sifields")?;
+        let sigsys = sifields.child_member_with_name("_sigsys")?;
+        Some(sigsys.child_at_index(0).value_as_address())
+    }
 }
 
 impl IsValid for SBThread {

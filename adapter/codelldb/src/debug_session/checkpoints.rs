@@ -29,7 +29,7 @@ impl Checkpoints {
 }
 
 impl DebugSession {
-    pub(super) fn is_checkpoint_event(&self, process_event: &SBProcessEvent) -> bool {
+    pub(super) fn should_create_checkpoint_event(&self, process_event: &SBProcessEvent) -> bool {
         if process_event.process_state() != ProcessState::Stopped {
             return false;
         }

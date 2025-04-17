@@ -42,6 +42,7 @@ pub enum PythonEvent {
     DebuggerMessage { output: String, category: String },
     SendDapEvent(EventBody),
     WatchCommand { address: u64 },
+    GetCheckpointByAccess { last_access : u64 },
 }
 
 // Interface through which the rest of CodeLLDB interacts with Python, via C ABI.

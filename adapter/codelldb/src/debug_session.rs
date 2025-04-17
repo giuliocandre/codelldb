@@ -1452,6 +1452,9 @@ impl DebugSession {
             PythonEvent::WatchCommand { address } => {
                 self.add_watch_page(address);
             }
+            PythonEvent::GetCheckpointByAccess { last_access } => {
+                self.print_checkpoint_by_last_access(last_access);
+            }
         }
     }
 
@@ -1581,13 +1584,6 @@ impl DebugSession {
             match process_event.process_state() {
                 Running | Stepping | Attaching | Launching => self.notify_process_running(),
                 Stopped => {
-                    if self.should_create_checkpoint_event(process_event) {
-                        // Handle checkpoint event
-                        if let Err(e) = self.new_checkpoint() {
-                            self.console_error(format!("Failed to create checkpoint: {}", e));
-                            self.notify_process_stopped();
-                        }
-                    } else
                     if !process_event.restarted() {
                         self.notify_process_stopped()
                     }
@@ -1642,6 +1638,11 @@ impl DebugSession {
                 }
             }
         };
+
+        // Check if we should create a checkpoint and return early
+        if stopped_thread.stop_reason() == StopReason::Signal && self.handle_checkpoint_event(&stopped_thread) {
+            return;
+        }
 
         // Analyze stop reason
         let (stop_reason, description, hit_breakpoint) = match stopped_thread.stop_reason() {

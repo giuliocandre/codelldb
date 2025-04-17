@@ -41,24 +41,37 @@ impl Checkpoints {
             checkpoints: Vec::new(),
         }
     }
+
+    pub(super) fn find_checkpoint_by_last_access(&self, address: Address) -> Option<&Checkpoint> {
+        self.checkpoints.iter().rev().find(|checkpoint| {
+            checkpoint.last_access.map(|last_access| last_access == address).unwrap_or(false)
+        })
+    }
 }
 
 impl DebugSession {
-    pub(super) fn should_create_checkpoint_event(&self, process_event: &SBProcessEvent) -> bool {
-        if process_event.process_state() != ProcessState::Stopped {
+
+    pub (super) fn handle_checkpoint_event(&mut self, stopped_thread: &SBThread) -> bool {
+        if !self.should_create_checkpoint_event(stopped_thread) {
+            self.console_message("should_create_checkpoint_event false");
             return false;
         }
 
-        let process = self.target.process();
-        let thread = process.selected_thread();
+        self.new_checkpoint().is_ok()
+    }
+
+    pub(super) fn should_create_checkpoint_event(&self, stopped_thread: &SBThread) -> bool {
+        let thread = stopped_thread;
 
         if thread.stop_reason() != StopReason::Signal {
+            self.console_message("checkpoint_event stop_reason false");
             return false;
         }
 
         // Check if the signal is SIGSEGV
         let signal = thread.stop_reason_data_at_index(0);
         if signal != 11 { // SIGSEGV
+            self.console_message("checkpoint_event signal 11 false");
             return false;
         }
 
@@ -66,6 +79,7 @@ impl DebugSession {
             Some(addr) => addr,
             None => return false,
         };
+        self.console_message(format!("checkpoint_event fault addr {:#x}", fault_address));
 
         // Check if the faulting address is in a watched page
         let aligned_addr = fault_address & !0xFFF;
@@ -78,11 +92,13 @@ impl DebugSession {
         let frame = thread.frame_at_index(0);
 
         // TODO: dirty hack with expression evaluation
-        let expression = format!("(int)mprotect({}, {}, 0x1000)", address, protection);
-        let (pp_expr, _) =
-            expressions::prepare_with_format(&expression, self.default_expr_type).map_err(blame_user)?;
-
-        self.evaluate_expr_in_frame(&pp_expr, Some(&frame))?;
+        let expression = format!("(int)mprotect({}, 0x1000, {})", address, protection);
+        let val = frame.evaluate_expression(&expression);
+        if !val.is_valid() || val.value_as_signed(-1) == -1 {
+            let err = format!("mprotect({:#x}, {}) : {:#?}", address, protection, val);
+            self.console_error(err);
+            Err(err)
+        }
         Ok(())
     }
 
@@ -90,7 +106,7 @@ impl DebugSession {
         // Add the address to the watch list
         let mut checkpoints = self.checkpoints.borrow_mut();
         let aligned_addr = address & !0xFFF;
-        checkpoints.watch_pages.insert(address);
+        checkpoints.watch_pages.insert(aligned_addr);
         if let Err(e) = self.mprotect_memory(aligned_addr, 0x1) {
             self.console_error(format!("Failed to mprotect memory: {}", e));
             return;
@@ -117,7 +133,12 @@ impl DebugSession {
 
         self.mprotect_memory(aligned_addr, 0x3)?;
 
-        if let Err(e) = thread.step_instruction(true) {
+        // Need the sync mode here because we want to step a single instruction without getting another
+        // processs Stopped event (normally LLDB stops with StopReason::Trace)
+        self.before_resume();
+        if let Err(e) = self.with_sync_mode(|| {
+            thread.step_instruction(true)
+        }) {
             self.console_error(format!("Failed to step instruction: {}", e));
             return Err(e.into())
         }
@@ -131,5 +152,11 @@ impl DebugSession {
             return Err(e.into())
         }
         Ok(())
+    }
+
+    pub(super) fn print_checkpoint_by_last_access(&mut self, address: Address) {
+        if let Some(cp) = self.checkpoints.borrow().find_checkpoint_by_last_access(address) {
+            self.console_message(format!("{:#?}", cp));
+        }
     }
 }

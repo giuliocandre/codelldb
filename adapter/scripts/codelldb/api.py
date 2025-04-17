@@ -76,8 +76,11 @@ def create_webview(html: Optional[str] = None, title: Optional[str] = None, view
 
 def watch_address(addr: int):
     debugger_id = interface.current_debugger().GetID()
-    interface.fire_event(debugger_id, dict(type='DebuggerMessage', address=addr))
+    interface.fire_event(debugger_id, dict(type='WatchCommand', address=addr))
 
+def get_checkpoint_by_access(addr: int):
+    debugger_id = interface.current_debugger().GetID()
+    interface.fire_event(debugger_id, dict(type='GetCheckpointByAccess', last_access=addr))
 
 def debugger_message(output: str, category: str = 'console'):
     debugger_id = interface.current_debugger().GetID()

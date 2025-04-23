@@ -96,8 +96,8 @@ impl DebugSession {
         let val = frame.evaluate_expression(&expression);
         if !val.is_valid() || val.value_as_signed(-1) == -1 {
             let err = format!("mprotect({:#x}, {}) : {:#?}", address, protection, val);
-            self.console_error(err);
-            Err(err)
+            self.console_error(&err);
+            return Err(Error::from(err));
         }
         Ok(())
     }

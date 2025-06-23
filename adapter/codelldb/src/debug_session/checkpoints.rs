@@ -6,6 +6,7 @@ use crate::prelude::*;
 use std::cell::RefCell;
 use crate::expressions::{self, FormatSpec, PreparedExpression};
 use serde::{Serialize, Deserialize};
+use serde::ser::{Serializer, SerializeStruct};
 
 /* Checkpoints are created before the actual memory write */
 #[derive(Clone)]
@@ -25,8 +26,36 @@ impl std::fmt::Debug for Checkpoint {
                 .map(|frame| format!("{:?}", frame))
                 .collect::<Vec<_>>()
                 .join("\n")))
-            .field("registers", &"<SBValueList>")
             .finish()
+    }
+}
+
+impl Serialize for Checkpoint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 4 fields: pc, last_access, frames, (registers is skipped)
+        let mut state = serializer.serialize_struct("Checkpoint", 3)?;
+        state.serialize_field("pc", &self.pc)?;
+        state.serialize_field("last_access", &self.last_access)?;
+
+        // Serialize frames as described
+        let frames: Vec<_> = self.frames.iter().map(|frame| {
+            let pc_addr = frame.pc_address();
+            let load_address = pc_addr.load_address(&frame.thread().process().target());
+            let file_address = pc_addr.file_address();
+            let filespec = pc_addr.module().unwrap_or_default().file_spec();
+            let module_name = filespec.filename().to_str();
+            serde_json::json!({
+                "load_address": load_address,
+                "file_address": file_address,
+                "module": module_name,
+            })
+        }).collect();
+
+        state.serialize_field("frames", &frames)?;
+        state.end()
     }
 }
 
@@ -165,10 +194,11 @@ impl DebugSession {
     }
 
     pub(super) fn get_checkpoints(&mut self) {
-        // let checkpoints = self.checkpoints.borrow().checkpoints.clone();
-        self.handle_python_message(serde_json::json!({
+        let checkpoints = self.checkpoints.borrow().checkpoints.clone();
+        let json_message = serde_json::json!({
             "type": "GetCheckpoints",
-            "checkpoints": "test",
-        }));
+            "checkpoints": checkpoints,
+        });
+        self.handle_python_message(json_message);
     }
 }

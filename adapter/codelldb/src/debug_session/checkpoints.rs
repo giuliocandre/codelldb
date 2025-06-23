@@ -121,6 +121,7 @@ impl DebugSession {
         let frame = thread.frame_at_index(0);
         let fault_address = thread.current_fault_addr().ok_or("Failed to get fault address")?;
         let aligned_addr = fault_address & !0xFFF;
+        let signals = process.unix_signals();
 
         let checkpoint = Checkpoint {
             pc: frame.pc_address().load_address(&self.target),
@@ -132,6 +133,8 @@ impl DebugSession {
         self.checkpoints.borrow_mut().checkpoints.push(checkpoint);
 
         self.mprotect_memory(aligned_addr, 0x3)?;
+        // Suppress SIGSEGV while stepping over
+        signals.set_should_suppress(11, true);
 
         // Need the sync mode here because we want to step a single instruction without getting another
         // processs Stopped event (normally LLDB stops with StopReason::Trace)
@@ -146,7 +149,9 @@ impl DebugSession {
         self.mprotect_memory(aligned_addr, 0x1)?;
 
 
-        // Continue execution without sending StoppedEvent
+        // Continue execution and reactivate SIGSEGV
+        signals.set_should_suppress(11, false);
+
         if let Err(e) = process.resume() {
             self.console_error(format!("Failed to continue execution: {}", e));
             return Err(e.into())

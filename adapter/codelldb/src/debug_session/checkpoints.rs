@@ -37,7 +37,6 @@ impl Serialize for Checkpoint {
     {
         // 4 fields: pc, last_access, frames, (registers is skipped)
         let mut state = serializer.serialize_struct("Checkpoint", 3)?;
-        state.serialize_field("pc", &self.pc)?;
         state.serialize_field("last_access", &self.last_access)?;
 
         // Serialize frames as described

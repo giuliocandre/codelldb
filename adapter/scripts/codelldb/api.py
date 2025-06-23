@@ -2,6 +2,7 @@ from lldb import SBValue
 import warnings
 import __main__
 from typing import Any, Optional, Union
+from pprint import pprint
 
 from . import interface
 from .value import Value
@@ -74,13 +75,6 @@ def create_webview(html: Optional[str] = None, title: Optional[str] = None, view
                            )
     return webview
 
-def watch_address(addr: int):
-    debugger_id = interface.current_debugger().GetID()
-    interface.fire_event(debugger_id, dict(type='WatchCommand', address=addr))
-
-def get_checkpoint_by_access(addr: int):
-    debugger_id = interface.current_debugger().GetID()
-    interface.fire_event(debugger_id, dict(type='GetCheckpointByAccess', last_access=addr))
 
 def debugger_message(output: str, category: str = 'console'):
     debugger_id = interface.current_debugger().GetID()
@@ -122,5 +116,57 @@ def display_html(html: str, title: Optional[str] = None, position: Optional[int]
             html_webview.reveal(view_column=position)
 
 
+
+def _watch_page(addr: int):
+    debugger_id = interface.current_debugger().GetID()
+    interface.fire_event(debugger_id, dict(type='WatchCommand', address=addr))
+
+def watch_page(debugger, command, result, internal_dict):
+    try:
+        target = debugger.GetSelectedTarget()
+        process = target.GetProcess()
+        args = command.strip().split()
+        if len(args) != 1:
+            result.SetError("Usage: watch_page <address>")
+            return
+        addr = target.EvaluateExpression(args[0]).GetValueAsUnsigned()
+        _watch_page(addr)
+    except Exception as e:
+        result.SetError(str(e))
+
+def get_checkpoint_by_access(addr: int):
+    debugger_id = interface.current_debugger().GetID()
+    interface.fire_event(debugger_id, dict(type='GetCheckpointByAccess', last_access=addr))
+
+class CBManager:
+    def __init__(self):
+        self._callbacks = {}
+        self.idx = 0
+
+    def new_cb(self):
+        # Must be called from a valid debugger context
+        debugger_id = interface.current_debugger().GetID()
+        def _debug_message(msg):
+            interface.fire_event(debugger_id, dict(type='DebuggerMessage', output=msg['checkpoints'], category='python'))
+            self.remove_cb(self.idx)
+
+        self._callbacks[self.idx] = _debug_message
+        self.idx += 1
+
+        return _debug_message
+
+    def remove_cb(self, id):
+        interface.on_did_receive_message.remove(self._callbacks[id])
+        self._callbacks.pop(id)
+
+cb_manager = CBManager()
+
+def get_checkpoints():
+
+    debugger_id = interface.current_debugger().GetID()
+    interface.on_did_receive_message.add(cb_manager.new_cb())
+    interface.fire_event(debugger_id, dict(type='GetCheckpoints'))
+
 def __lldb_init_module(debugger, internal_dict):  # pyright: ignore
     debugger.HandleCommand('command script add -c debugger.DebugInfoCommand debug_info')
+    debugger.HandleCommand('command script add -f debugger.api.watch_page watch_page')

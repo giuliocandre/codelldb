@@ -5,6 +5,7 @@ use adapter_protocol::*;
 use crate::prelude::*;
 use std::cell::RefCell;
 use crate::expressions::{self, FormatSpec, PreparedExpression};
+use serde::{Serialize, Deserialize};
 
 /* Checkpoints are created before the actual memory write */
 #[derive(Clone)]
@@ -53,7 +54,7 @@ impl DebugSession {
 
     pub (super) fn handle_checkpoint_event(&mut self, stopped_thread: &SBThread) -> bool {
         if !self.should_create_checkpoint_event(stopped_thread) {
-            self.console_message("should_create_checkpoint_event false");
+            // self.console_message("should_create_checkpoint_event false");
             return false;
         }
 
@@ -64,14 +65,12 @@ impl DebugSession {
         let thread = stopped_thread;
 
         if thread.stop_reason() != StopReason::Signal {
-            self.console_message("checkpoint_event stop_reason false");
             return false;
         }
 
         // Check if the signal is SIGSEGV
         let signal = thread.stop_reason_data_at_index(0);
         if signal != 11 { // SIGSEGV
-            self.console_message("checkpoint_event signal 11 false");
             return false;
         }
 
@@ -105,7 +104,7 @@ impl DebugSession {
     pub(super) fn add_watch_page(&mut self, address: u64) {
         // Add the address to the watch list
         let mut checkpoints = self.checkpoints.borrow_mut();
-        let aligned_addr = address & !0xFFF;
+        let aligned_addr = address & 0xFFFFFFFFFFF000; // Ignore top byte and page-align
         checkpoints.watch_pages.insert(aligned_addr);
         if let Err(e) = self.mprotect_memory(aligned_addr, 0x1) {
             self.console_error(format!("Failed to mprotect memory: {}", e));
@@ -163,5 +162,13 @@ impl DebugSession {
         if let Some(cp) = self.checkpoints.borrow().find_checkpoint_by_last_access(address) {
             self.console_message(format!("{:#?}", cp));
         }
+    }
+
+    pub(super) fn get_checkpoints(&mut self) {
+        // let checkpoints = self.checkpoints.borrow().checkpoints.clone();
+        self.handle_python_message(serde_json::json!({
+            "type": "GetCheckpoints",
+            "checkpoints": "test",
+        }));
     }
 }

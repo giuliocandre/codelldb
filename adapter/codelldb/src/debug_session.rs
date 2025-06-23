@@ -1455,6 +1455,9 @@ impl DebugSession {
             PythonEvent::GetCheckpointByAccess { last_access } => {
                 self.print_checkpoint_by_last_access(last_access);
             }
+            PythonEvent::GetCheckpoints => {
+                self.get_checkpoints();
+            }
         }
     }
 

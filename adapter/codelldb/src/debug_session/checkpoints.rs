@@ -9,52 +9,44 @@ use serde::{Serialize, Deserialize};
 use serde::ser::{Serializer, SerializeStruct};
 
 /* Checkpoints are created before the actual memory write */
-#[derive(Clone)]
+#[derive(Clone, Serialize, Debug)]
 pub struct Checkpoint {
     pub pc: Address,
     pub last_access: Option<Address>,
-    pub frames: Vec<SBFrame>,
-    pub registers: SBValueList,
+    pub frames: Vec<FrameInfo>,
+    // pub registers: SBValueList,
 }
 
-impl std::fmt::Debug for Checkpoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Checkpoint")
-            .field("pc", &self.pc)
-            .field("last_access", &self.last_access)
-            .field("frames", &format!("\n{}", self.frames.iter()
-                .map(|frame| format!("{:?}", frame))
-                .collect::<Vec<_>>()
-                .join("\n")))
-            .finish()
+#[derive(Serialize, Debug, Clone)]
+pub struct FrameInfo {
+    pub load_address: u64,
+    pub file_address: usize,
+    pub module: Option<String>,
+}
+
+impl FrameInfo {
+    pub fn new(frame: &SBFrame) -> Self {
+        let pc_address = frame.pc_address();
+        let load_address = pc_address.load_address(&frame.thread().process().target());
+        let file_address = pc_address.file_address();
+        let filespec = pc_address.module().unwrap_or_default().file_spec();
+        let module = match filespec.filename().to_str() {
+            Some(result) => Some(String::from(result)),
+            None => None,
+        };
+
+
+        FrameInfo {
+            load_address,
+            file_address,
+            module,
+        }
     }
 }
 
-impl Serialize for Checkpoint {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // 4 fields: pc, last_access, frames, (registers is skipped)
-        let mut state = serializer.serialize_struct("Checkpoint", 3)?;
-        state.serialize_field("last_access", &self.last_access)?;
-
-        // Serialize frames as described
-        let frames: Vec<_> = self.frames.iter().map(|frame| {
-            let pc_addr = frame.pc_address();
-            let load_address = pc_addr.load_address(&frame.thread().process().target());
-            let file_address = pc_addr.file_address();
-            let filespec = pc_addr.module().unwrap_or_default().file_spec();
-            let module_name = filespec.filename().to_str();
-            serde_json::json!({
-                "load_address": load_address,
-                "file_address": file_address,
-                "module": module_name,
-            })
-        }).collect();
-
-        state.serialize_field("frames", &frames)?;
-        state.end()
+impl From<SBFrame> for FrameInfo {
+    fn from(frame: SBFrame) -> Self {
+        FrameInfo::new(&frame)
     }
 }
 
@@ -152,8 +144,8 @@ impl DebugSession {
 
         let checkpoint = Checkpoint {
             pc: frame.pc_address().load_address(&self.target),
-            frames: thread.frames().collect(),
-            registers: frame.registers(),
+            frames: thread.frames().map(Into::into).collect(),
+            // registers: frame.registers(),
             last_access: Some(fault_address),
         };
 
@@ -201,3 +193,4 @@ impl DebugSession {
         self.handle_python_message(json_message);
     }
 }
+

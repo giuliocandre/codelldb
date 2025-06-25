@@ -142,26 +142,198 @@ class CBManager:
     def __init__(self):
         self._callbacks = {}
         self.idx = 0
+        self.wv = None
+
+    def create_webview(self):
+        webview = Webview(self.debugger_id)
+        self.wv = webview
+
+        def on_disposed(msg):
+            self.wv = None
+
+        # self.wv.on_did_receive_message.add(on_message)
+        self.wv.on_did_dispose.add(on_disposed)
+        html = '''
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+            <meta charset="UTF-8" />
+            <title>Checkpoints </title>
+            <style>
+                table {
+                width: 100%;
+                border-collapse: collapse;
+                font-family: sans-serif;
+                }
+                th, td {
+                padding: 8px;
+                border: 1px solid #ccc;
+                }
+                .toggle {
+                cursor: pointer;
+                font-weight: bold;
+                }
+                .frames-row {
+                display: none;
+                }
+                .frames-cell {
+                padding-left: 40px;
+                font-family: monospace;
+                white-space: pre;
+                }
+            </style>
+            </head>
+            <body>
+            <form id="filter-form" style="margin-bottom: 16px;">
+                <label for="last-access-input">Filter by last_access (hex): </label>
+                <input type="text" id="last-access-input" placeholder="e.g. 0x1234abcd" />
+                <button type="submit">Filter</button>
+                <button type="button" id="reset-btn">Reset</button>
+            </form>
+            <table id="data-table">
+                <thead>
+                <tr>
+                    <th></th>
+                    <th>Last Access</th>
+                    <th>PC</th>
+                    <th>File Address</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <script>
+                var jsonData = [];
+
+                const tbody = document.querySelector('#data-table tbody');
+
+                function renderTable(data) {
+                tbody.innerHTML = '';
+                data.forEach((item, index) => {
+                    // Main row
+                    const tr = document.createElement('tr');
+                    let toggleTd = document.createElement('td');
+                    let a = document.createElement('a');
+                    toggleTd.className = 'toggle';
+                    a.textContent = '▶';
+                    a.id = `toggle-${index}`;
+                    toggleTd.appendChild(a);
+                    tr.appendChild(toggleTd);
+
+                    tr.innerHTML += `
+                    <td>${'0x' + item.last_access.toString(16)}</td>
+                    <td>${'0x' + item.frames[0].load_address.toString(16)}</td>
+                    <td>${item.frames[0].module} + ${'0x' + item.frames[0].file_address.toString(16)}</td>
+                    `;
+                    tbody.appendChild(tr);
+
+                    document.getElementById(a.id).onclick = () => {
+                    const details = document.getElementById(`frames-${index}`);
+                    const expanded = details.style.display === 'table-row';
+                    details.style.display = expanded ? 'none' : 'table-row';
+                    document.getElementById(`toggle-${index}`).textContent = expanded ? '▶' : '▼';
+                    };
+
+                    // Expandable row with frame details
+                    const framesTr = document.createElement('tr');
+                    framesTr.id = `frames-${index}`;
+                    framesTr.className = 'frames-row';
+
+                    const frameDetails = item.frames.map(frame => {
+                    return `[${frame.module} + 0x${frame.file_address.toString(16)}] 0x${frame.load_address.toString(16)}`
+                    }).join('\\n');
+
+                    const frameTd = document.createElement('td');
+                    frameTd.colSpan = 4;
+                    frameTd.className = 'frames-cell';
+                    frameTd.textContent = frameDetails;
+
+                    framesTr.appendChild(frameTd);
+                    tbody.appendChild(framesTr);
+                });
+                }
+
+
+                // Filtering logic
+                document.getElementById('filter-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const input = document.getElementById('last-access-input').value.trim();
+                if (!input) return renderTable(jsonData);
+                let searchValue = parseInt(input, 16);
+
+                if (isNaN(searchValue)) {
+                    alert('Invalid hex or decimal number');
+                    return;
+                }
+                const filtered = jsonData.filter(item =>
+                    item.last_access <= searchValue && searchValue < item.last_access + 16
+                );
+                renderTable(filtered);
+                });
+
+                document.getElementById('reset-btn').addEventListener('click', function() {
+                document.getElementById('last-access-input').value = '';
+                renderTable(jsonData);
+                });
+
+                window.addEventListener('message', event => {
+                    console.log('Received message:', event.data);
+                    if (event.data && event.data.type === 'checkpointData') {
+                        jsonData = event.data.json;
+                        renderTable(event.data.json);
+                    }
+                });
+            </script>
+            </body>
+            </html>
+        '''
+
+
+        interface.send_message(self.debugger_id,
+                        dict(message='webviewCreate',
+                            id=webview.id,
+                            html=html,
+                            title='Checkpoints',
+                            viewColumn=2,
+                            preserveFocus=False,
+                            enableFindWidget=True,
+                            retainContextWhenHidden=True,
+                            enableScripts=True,
+                            preserveOrphaned=True,
+                            )
+                        )
+        self.wv.reveal(view_column=2)
+
+
+    def update_webview(self, data):
+        interface.fire_event(self.debugger_id, dict(type='DebuggerMessage', output=data, category='python'))
+        if not self.wv:
+            self.create_webview()
+
+        self.wv.post_message(dict(type='checkpointData', json=data))
+
 
     def new_cb(self):
         # Must be called from a valid debugger context
-        debugger_id = interface.current_debugger().GetID()
+        self.debugger_id = interface.current_debugger().GetID()
+        idx = self.idx
         def _debug_message(msg):
-            interface.fire_event(debugger_id, dict(type='DebuggerMessage', output=msg['checkpoints'], category='python'))
-            self.remove_cb(self.idx)
+            checkpoints = msg['checkpoints']
+            self.update_webview(checkpoints)
+            self.remove_cb(idx)
 
-        self._callbacks[self.idx] = _debug_message
+        self._callbacks[idx] = _debug_message
         self.idx += 1
 
         return _debug_message
 
-    def remove_cb(self, id):
-        interface.on_did_receive_message.remove(self._callbacks[id])
-        self._callbacks.pop(id)
+    def remove_cb(self, idx):
+        interface.on_did_receive_message.remove(self._callbacks[idx])
+        self._callbacks.pop(idx)
 
 cb_manager = CBManager()
 
-def get_checkpoints():
+def get_checkpoints(debugger, command, result, internal_dict):
 
     debugger_id = interface.current_debugger().GetID()
     interface.on_did_receive_message.add(cb_manager.new_cb())

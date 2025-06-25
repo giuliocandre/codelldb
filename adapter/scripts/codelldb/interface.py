@@ -166,6 +166,8 @@ def session_init(debugger, console_fd):
         console_fd = msvcrt.open_osfhandle(console_fd, 0)  # pyright: ignore
     session_stdouts[debugger.GetID()] = os.fdopen(console_fd, 'w', 1, 'utf-8')  # line-buffered
     DebugInfoCommand.register(debugger)
+    debugger.HandleCommand('command script add -f debugger.api.watch_page watch_page')
+    debugger.HandleCommand('command script add -f debugger.api.get_checkpoints get_checkpoints')
     return True
 
 

@@ -1454,12 +1454,6 @@ impl DebugSession {
             match process_event.process_state() {
                 Running | Stepping | Attaching | Launching => self.notify_process_running(),
                 Stopped => {
-                    if self.is_checkpoint_event(process_event) {
-                        // Handle checkpoint event
-                        if let Err(e) = self.new_checkpoint() {
-                            self.console_error(format!("Failed to create checkpoint: {}", e));
-                        }
-                    } else
                     if !process_event.restarted() {
                         self.notify_process_stopped()
                     }

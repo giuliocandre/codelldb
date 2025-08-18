@@ -190,7 +190,7 @@ class CBManager:
             <body>
             <form id="filter-form" style="margin-bottom: 16px;">
                 <label for="last-access-input">Filter by last_access (hex): </label>
-                <input type="text" id="last-access-input" placeholder="e.g. 0x1234abcd" />
+                <input type="text" id="last-access-input" placeholder="0x1234abcd [+ size]" />
                 <button type="submit">Filter</button>
                 <button type="button" id="reset-btn">Reset</button>
             </form>
@@ -259,18 +259,35 @@ class CBManager:
 
 
                 // Filtering logic
+                function parsenum(input) {
+                ret = NaN;
+                if (input.startsWith('0x') || input.startsWith('0X')) {
+                    ret = parseInt(input, 16);
+                    } else {
+                    ret = parseInt(input, 10);
+                    }
+                return ret;
+                }
+
                 document.getElementById('filter-form').addEventListener('submit', function(e) {
                 e.preventDefault();
                 const input = document.getElementById('last-access-input').value.trim();
                 if (!input) return renderTable(jsonData);
-                let searchValue = parseInt(input, 16);
+                let searchValue;
+                let endValue = 8;
+                searchValue = parsenum(input);
+                // Check for "num1 + num2" pattern
+                if (input.includes('+')) {
+                    const parts = input.split('+').map(s => s.trim());
+                    endValue = parsenum(parts[1]);
+                }
 
-                if (isNaN(searchValue)) {
+                if (isNaN(searchValue) || isNaN(endValue)) {
                     alert('Invalid hex or decimal number');
                     return;
                 }
                 const filtered = jsonData.filter(item =>
-                    item.last_access <= searchValue && searchValue < item.last_access + 16
+                    searchValue <= item.last_access && item.last_access <= searchValue + endValue
                 );
                 renderTable(filtered);
                 });
